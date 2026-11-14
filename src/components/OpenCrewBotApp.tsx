@@ -12,6 +12,7 @@ import { NewBotDrawer } from "./BotForms";
 import { NewRoomDrawer } from "./RoomForms";
 import { SettingsPanel } from "./SettingsPanel";
 import { ConnectionsPanel } from "./ConnectionsPanel";
+import { ReportViewer, Workspace, type WorkspacePage } from "./Workspace";
 
 /** Modal sheets. Editing an existing bot or room happens in the inspector instead. */
 export type Panel = { kind: "new-bot" } | { kind: "new-room" } | { kind: "settings" } | { kind: "connections" } | null;
@@ -34,6 +35,10 @@ interface AppContext {
   sidebarOpen: boolean;
   setSidebarOpen: (open: boolean) => void;
   toast: (message: string) => void;
+  /** The open workspace page (tasks, approvals, memory…), or null when a chat is showing. */
+  page: WorkspacePage | null;
+  setPage: (page: WorkspacePage | null) => void;
+  showReport: (title: string, path: string) => void;
 }
 
 const Ctx = createContext<AppContext | null>(null);
@@ -69,6 +74,9 @@ export function OpenCrewBotApp() {
   const [inspector, setInspectorState] = useState<InspectorState>({ open: false, tab: "details" });
   const [sidebarOpen, setSidebarState] = useState(true);
   const [toastText, setToastText] = useState<string | null>(null);
+  const [page, setPageState] = useState<WorkspacePage | null>(null);
+  const [report, setReport] = useState<{ title: string; path: string } | null>(null);
+  const showReport = useCallback((title: string, path: string) => setReport({ title, path }), []);
   const activeRef = useRef<ConversationId | null>(null);
   useEffect(() => {
     activeRef.current = state.active;
@@ -113,8 +121,14 @@ export function OpenCrewBotApp() {
     [toast],
   );
 
+  const setPage = useCallback((next: WorkspacePage | null) => {
+    setPageState(next);
+    if (next) window.history.replaceState(null, "", `#page:${next}`);
+  }, []);
+
   const open = useCallback(
     (id: ConversationId | null) => {
+      setPageState(null);
       dispatch({ type: "open", id });
       if (id) {
         void loadTranscript(id);
@@ -144,7 +158,8 @@ export function OpenCrewBotApp() {
         dispatch({ type: "bootstrap", ...data });
         const fromHash = decodeURIComponent(window.location.hash.slice(1));
         const ids = new Set(data.conversations.map((c) => c.id));
-        if (fromHash && ids.has(fromHash)) open(fromHash);
+        if (fromHash.startsWith("page:")) setPageState(fromHash.slice(5) as WorkspacePage);
+        else if (fromHash && ids.has(fromHash)) open(fromHash);
         else if (window.matchMedia("(min-width: 768px)").matches) {
           const bot = data.bots.find((b) => b.pinned) ?? data.bots[0];
           const room = data.rooms.find((r) => r.pinned) ?? data.rooms[0];
@@ -188,11 +203,20 @@ export function OpenCrewBotApp() {
     if (state.active && document.visibilityState === "visible") void api.read(state.active).catch(() => {});
   }, [state.active, activeUnreadMarker]);
 
+  // Keep the approval badge current.
+  const approvalsVersion = state.versions.approvals;
+  useEffect(() => {
+    api
+      .approvals()
+      .then((d) => dispatch({ type: "pending", count: d.approvals.filter((a) => a.status === "pending").length }))
+      .catch(() => {});
+  }, [approvalsVersion]);
+
   const value = useMemo(
-    () => ({ state, dispatch, open, refresh, setPanel, inspector, setInspector, sidebarOpen, setSidebarOpen, toast }),
-    [state, open, refresh, inspector, setInspector, sidebarOpen, setSidebarOpen, toast],
+    () => ({ state, dispatch, open, refresh, setPanel, inspector, setInspector, sidebarOpen, setSidebarOpen, toast, page, setPage, showReport }),
+    [state, open, refresh, inspector, setInspector, sidebarOpen, setSidebarOpen, toast, page, setPage, showReport],
   );
-  const showInspector = inspector.open && Boolean(state.active);
+  const showInspector = inspector.open && Boolean(state.active) && !page;
 
   return (
     <Ctx.Provider value={value}>
@@ -200,14 +224,14 @@ export function OpenCrewBotApp() {
         <div
           className={clsx(
             "h-full shrink-0 border-r border-line",
-            state.active ? "hidden" : "flex w-full",
+            state.active || page ? "hidden" : "flex w-full",
             sidebarOpen ? "md:flex md:w-[312px]" : "md:hidden",
           )}
         >
           <Sidebar />
         </div>
-        <main className={clsx("relative h-full min-w-0 flex-1", state.active ? "flex" : "hidden md:flex")}>
-          <ChatView />
+        <main className={clsx("relative h-full min-w-0 flex-1", state.active || page ? "flex" : "hidden md:flex")}>
+          {page ? <Workspace page={page} /> : <ChatView />}
         </main>
         {showInspector && (
           <>
@@ -226,6 +250,7 @@ export function OpenCrewBotApp() {
       {panel?.kind === "new-room" && <NewRoomDrawer onClose={() => setPanel(null)} />}
       {panel?.kind === "settings" && <SettingsPanel onClose={() => setPanel(null)} />}
       {panel?.kind === "connections" && <ConnectionsPanel onClose={() => setPanel(null)} />}
+      {report && <ReportViewer title={report.title} path={report.path} onClose={() => setReport(null)} />}
       {toastText && (
         <div
           role="status"

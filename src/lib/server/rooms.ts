@@ -3,6 +3,7 @@
 import type { Bot, ChatMessage, Room, RouteNote } from "@/lib/shared/types";
 import { listBots, listMessages } from "./db";
 import { pickResponders } from "./jev";
+import { activePlanIn, amendPlan, lastPlanIn, resumePlan, startPlan } from "./engine";
 import { runTurn, stopEpochOf } from "./runtime";
 
 /** How many bot-to-bot @mention hops one message from the person can start. */
@@ -92,7 +93,27 @@ export async function runRoom(room: Room, userMessage: ChatMessage): Promise<voi
   const conversationId = roomConversationId(room.id);
   const epoch = stopEpochOf(conversationId);
   const history = await listMessages(conversationId, 60);
-  const { bots: responders, route } = await decideResponders(room, members, messageText(userMessage), history, bots);
+  const text = messageText(userMessage);
+
+  // 2.0: a new message while a plan runs is a new instruction for that plan.
+  const active = activePlanIn(conversationId);
+  if (active) {
+    await amendPlan(active.id, text);
+    return;
+  }
+  let decided = await decideResponders(room, members, text, history, bots);
+  const chief = members.find((b) => b.role === "chief") ?? allBots.find((b) => b.role === "chief");
+  if (room.responder === "chief" && chief && decided.route.by !== "mention") {
+    const last = await lastPlanIn(conversationId);
+    if (last?.status === "interrupted" && /^\s*(resume|continue)\b/i.test(text)) {
+      await resumePlan(last.id);
+      return;
+    }
+    // The Chief of Staff turns the request into a task plan; a simple question it answers itself.
+    if (await startPlan({ conversationId, instruction: text, chief })) return;
+    decided = { bots: [chief], route: { by: "chief" } };
+  }
+  const { bots: responders, route } = decided;
 
   const queue: Array<{ bot: Bot; route: RouteNote; depth: number }> = responders.map((bot) => ({ bot, route, depth: 0 }));
   while (queue.length && stopEpochOf(conversationId) === epoch) {

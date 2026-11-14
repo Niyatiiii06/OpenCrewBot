@@ -11,7 +11,7 @@ import { BotAvatar, Button, Drawer, Field, Segmented, inputClass } from "./ui";
 export function RoomForm({ room, onDone }: { room?: Room; onDone?: (room: Room) => void }) {
   const { state, open, toast } = useApp();
   const [initial, setInitial] = useState<RoomInput>(() =>
-    room ? { ...room } : { name: "", topic: "", emoji: "", memberIds: [], leadId: null, responder: "auto", pinned: false },
+    room ? { ...room } : { name: "", topic: "", emoji: "", memberIds: [], leadId: null, responder: state.bots.some((b) => b.role === "chief") ? "chief" : "auto", pinned: false },
   );
   const [form, setForm] = useState<RoomInput>(initial);
   const [saving, setSaving] = useState(false);
@@ -107,9 +107,10 @@ export function RoomForm({ room, onDone }: { room?: Room; onDone?: (room: Room) 
             value={form.responder}
             onChange={(v) => set("responder", v)}
             options={[
-              { value: "auto", label: "Auto", hint: state.status?.keys.jev ? "Jev picks." : "Jev picks (needs key)." },
-              { value: "lead", label: "Lead", hint: "The lead answers." },
-              { value: "everyone", label: "Everyone", hint: "Each bot answers." },
+              { value: "chief", label: "Chief", hint: "Plans and delegates." },
+              { value: "auto", label: "Auto", hint: state.status?.keys.jev ? "Jev picks." : "Jev or lead." },
+              { value: "lead", label: "Lead", hint: "Lead answers." },
+              { value: "everyone", label: "All", hint: "Each answers." },
             ]}
           />
         </Field>

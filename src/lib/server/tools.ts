@@ -1,48 +1,17 @@
 // The tools a bot gets, from its settings. Names are short snake_case words
 // because open models pick tools by name more reliably that way.
 import type { ToolsInput } from "@mastra/core/agent";
-import { createTool, createCodeMode } from "@mastra/core/tools";
+import { createCodeMode } from "@mastra/core/tools";
 import type { ToolCategory } from "@mastra/core/agent-controller";
 import { createTavilyCrawlTool, createTavilyExtractTool, createTavilySearchTool } from "@mastra/tavily";
 import { QuickJsCodeModeTransport } from "@mastra/quickjs";
-import { z } from "zod";
 import type { Bot, Source } from "@/lib/shared/types";
-import { appendMemory, editMemory } from "./memory-files";
-import { publish } from "./bus";
 import { keys } from "./config";
 import { mcpServerNames } from "./connectors";
+import { buildNativeTools } from "./native-tools";
+import { TOOL_META } from "./permissions";
 
 export const CODE_MODE_TOOL = "execute_typescript";
-
-function memoryTools(botId: string): ToolsInput {
-  return {
-    memory_add: createTool({
-      id: "memory_add",
-      description:
-        "Save one durable fact to your MEMORY.md (a preference, a decision, something about the person or your ongoing work). One short line per call.",
-      inputSchema: z.object({
-        note: z.string().min(1).describe("The fact, as one short sentence."),
-        section: z.string().optional().describe("Optional heading to file it under, e.g. 'About the person' or 'Projects'."),
-      }),
-      execute: async ({ note, section }) => {
-        appendMemory(botId, note, section);
-        publish({ type: "memory-changed", botId });
-        return { saved: true };
-      },
-    }),
-    memory_edit: createTool({
-      id: "memory_edit",
-      description:
-        "Fix or remove a line in your MEMORY.md. `find` must match the current text exactly once; use an empty `replace` to delete it.",
-      inputSchema: z.object({ find: z.string().min(1), replace: z.string() }),
-      execute: async ({ find, replace }) => {
-        const result = editMemory(botId, find, replace);
-        if (result.ok) publish({ type: "memory-changed", botId });
-        return result;
-      },
-    }),
-  };
-}
 
 function webTools(): ToolsInput {
   const apiKey = process.env.TAVILY_API_KEY;
@@ -69,12 +38,12 @@ export function buildTools(bot: Bot): BotToolset {
   if (bot.tools.webSearch && keys.tavily()) {
     Object.assign(tools, webTools());
     capabilities.push("Search the web (web_search), read pages (read_page) and crawl sites (crawl_site). Cite the URLs you used.");
-  } else if (bot.tools.webSearch) {
-    capabilities.push("Web search is switched on for you, but no Tavily key is set yet, so you can't search right now. Say so if asked.");
   }
-  if (bot.tools.memory) {
-    Object.assign(tools, memoryTools(bot.id));
-  }
+  // 2.0 tools: scoped memory, skills, data analysis, GitHub, email, Slack, Notion,
+  // collaboration, and a keyless web search when there is no Tavily key.
+  const native = buildNativeTools(bot);
+  Object.assign(tools, native.tools);
+  capabilities.push(...native.capabilities);
   if (bot.tools.codeMode) {
     // The program runs in a QuickJS (WebAssembly) isolate with no filesystem or
     // network; its only reach is the tools passed here, bridged back to the host.
@@ -113,6 +82,9 @@ export function toolCategory(toolName: string): ToolCategory | null {
     return READ_ONLY_VERB.test(action) ? "read" : "mcp";
   }
   if (toolName.startsWith("memory_")) return "edit";
+  // External native tools ask through the approval gate inside the tool, so Mastra lets them start.
+  const meta = TOOL_META.get(toolName);
+  if (meta) return meta.risk === "read" ? "read" : meta.risk === "local" ? "edit" : "other";
   if (toolName.startsWith("browser_")) {
     return /snapshot|screenshot|scroll|wait|tabs|close|get_|read|extract|console/.test(toolName) ? "read" : "execute";
   }
@@ -167,6 +139,42 @@ export function toolLabel(name: string, args: unknown): { label: string; detail?
       return { label: "Updated memory" };
     case CODE_MODE_TOOL:
       return { label: "Ran code" };
+    case "use_skill":
+      return { label: "Loaded skill", detail: String(a.skill ?? "") };
+    case "analyze_spreadsheet":
+      return { label: "Analysed spreadsheet", detail: String(a.file ?? "") };
+    case "make_chart":
+      return { label: "Drew chart", detail: String(a.title ?? "") };
+    case "save_artifact":
+      return { label: "Saved deliverable", detail: String(a.title ?? "") };
+    case "github_inspect_repo":
+      return { label: "Inspected repository", detail: String(a.repo ?? "") };
+    case "github_read_file":
+      return { label: "Read file on GitHub", detail: `${a.repo ?? ""} ${a.path ?? ""}`.trim() };
+    case "github_create_issue":
+      return { label: "Open GitHub issue", detail: `${a.repo ?? ""}: ${a.title ?? ""}` };
+    case "send_email":
+      return { label: "Send email", detail: `to ${a.to ?? ""}: ${a.subject ?? ""}` };
+    case "slack_post":
+      return { label: "Post to Slack", detail: String(a.text ?? "").slice(0, 80) };
+    case "notion_create_page":
+      return { label: "Create Notion page", detail: String(a.title ?? "") };
+    case "ask_teammate":
+      return { label: "Asked teammate", detail: `@${a.to ?? ""}` };
+    case "request_verification":
+      return { label: "Requested verification", detail: a.to ? `@${a.to}` : undefined };
+    case "challenge_conclusion":
+      return { label: "Challenged a conclusion", detail: `@${a.to ?? ""}` };
+    case "delegate_task":
+      return { label: "Delegated", detail: `@${a.to ?? ""}: ${String(a.task ?? "").slice(0, 80)}` };
+    case "share_finding":
+      return { label: "Shared finding", detail: String(a.title ?? "") };
+    case "create_agent":
+      return { label: "Created agent", detail: String(a.description ?? "").slice(0, 80) };
+    case "schedule_workflow":
+      return { label: "Scheduled workflow", detail: String(a.name ?? "") };
+    case "list_data_files":
+      return { label: "Listed data files" };
     case "ask_user":
       return { label: "Asked you" };
     default:
@@ -191,7 +199,9 @@ export function toolPreview(result: unknown): string | undefined {
   if (result === undefined || result === null) return undefined;
   if (typeof result === "string") return result.slice(0, 400);
   const r = result as Record<string, unknown>;
+  if (typeof r.message === "string" && r.message) return r.message.slice(0, 400);
   if (typeof r.answer === "string" && r.answer) return r.answer.slice(0, 400);
+  if (typeof r.markdown === "string" && r.markdown) return r.markdown.slice(0, 400);
   if (typeof r.error === "string") return r.error.slice(0, 400);
   if (typeof r.reason === "string") return r.reason.slice(0, 400);
   try {

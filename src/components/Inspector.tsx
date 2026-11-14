@@ -88,6 +88,13 @@ const TOOL_LABELS: Record<keyof Bot["tools"], string> = {
   codeMode: "Code mode",
   browser: "Browser",
   askUser: "Asks questions",
+  collaboration: "Teamwork",
+  dataAnalysis: "Data analysis",
+  github: "GitHub",
+  email: "Email",
+  slack: "Slack",
+  notion: "Notion",
+  artifacts: "Deliverables",
 };
 
 /** Which connected apps and MCP servers this bot may use. */
@@ -196,7 +203,7 @@ function BotDetails({ bot }: { bot: Bot }) {
           <p className="text-[13.5px] text-mute">No tools. It only chats.</p>
         )}
         {bot.tools.browser && (
-          <p className="mt-2.5 text-[12.5px] text-mute">{bot.approval === "full" ? "Full access: browses without asking." : "Asks before each browser action."}</p>
+          <p className="mt-2.5 text-[12.5px] text-mute">{bot.approval === "full" ? "Full access: runs its permitted tools without asking." : bot.approval === "controlled" ? "Controlled access: pre-approved actions run within limits; everything else asks." : "Ask first: every outside action waits for your approval."}</p>
         )}
       </Card>
       <BotConnections bot={bot} />

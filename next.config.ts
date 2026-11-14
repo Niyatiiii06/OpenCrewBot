@@ -18,6 +18,7 @@ const nextConfig: NextConfig = {
     "@tavily/core",
     "agent-browser",
     "quickjs-emscripten",
+    "nodemailer",
   ],
   turbopack: {
     rules: {

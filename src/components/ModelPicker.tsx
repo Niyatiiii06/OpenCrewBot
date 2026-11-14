@@ -92,7 +92,7 @@ function ModelDialog({ value, onPick, onClose }: { value: string; onPick: (id: s
             type="button"
             onClick={refresh}
             disabled={refreshing}
-            title="Refresh from Nebius Token Factory"
+            title="Refresh the model lists"
             aria-label="Refresh model list"
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-raised text-mute ring-1 ring-line hover:text-ink disabled:opacity-50"
           >
@@ -175,7 +175,7 @@ function ModelDialog({ value, onPick, onClose }: { value: string; onPick: (id: s
       <p className="mt-4 flex items-start gap-1.5 text-[12px] leading-snug text-faint">
         <Sparkles size={13} className="mt-px shrink-0" />
         <span>
-          {live ? `Live from Nebius Token Factory. Prices are $ in / out per 1M tokens. ` : "Built-in list. Add NEBIUS_API_KEY for the live catalog. "}
+          {live ? `Live lists from your providers. Prices are $ in / out per 1M tokens. ` : "Built-in list. Add a provider key for the live catalog. "}
           Auto routing, where Jev picks a model per message, is coming soon.
         </span>
       </p>

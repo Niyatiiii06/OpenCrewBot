@@ -1,14 +1,14 @@
 "use client";
 
 import clsx from "clsx";
-import { MoreHorizontal, PanelLeft, Pin, Plug, Plus, Search, Settings, X } from "lucide-react";
+import { Brain, CalendarClock, Cpu, History, ListChecks, MoreHorizontal, PanelLeft, Pin, Plug, Plus, Search, Settings, ShieldCheck, Sparkles, Wrench, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/client/api";
 import { timeLabel } from "@/lib/client/format";
 import type { Bot, ConversationSummary, Room } from "@/lib/shared/types";
 import { useApp } from "./OpenCrewBotApp";
 import { BotAvatar, IconButton, Mascot, RoomAvatar } from "./ui";
-import { NebiusLogo } from "./NebiusLogo";
+import type { WorkspacePage } from "./Workspace";
 
 type Row =
   | { kind: "room"; id: string; room: Room; summary?: ConversationSummary }
@@ -63,7 +63,8 @@ function RowItem({ row }: { row: Row }) {
   const { state, open, setInspector, toast } = useApp();
   const [menu, setMenu] = useState(false);
   const conversationId = `${row.kind === "room" ? "room" : "dm"}:${row.id}`;
-  const active = state.active === conversationId;
+  const { page } = useApp();
+  const active = state.active === conversationId && !page;
   const summary = row.summary;
   const running = summary?.running ?? [];
   const name = row.kind === "room" ? row.room.name : row.bot.name;
@@ -172,32 +173,62 @@ function RowItem({ row }: { row: Row }) {
   );
 }
 
-/** Bottom bar: who powers the models, and the way to settings and keys. */
+const PAGES: { page: WorkspacePage; label: string; icon: React.ReactNode }[] = [
+  { page: "tasks", label: "Tasks", icon: <ListChecks size={15} /> },
+  { page: "approvals", label: "Approvals", icon: <ShieldCheck size={15} /> },
+  { page: "memory", label: "Memory", icon: <Brain size={15} /> },
+  { page: "skills", label: "Skills & tools", icon: <Wrench size={15} /> },
+  { page: "integrations", label: "Integrations", icon: <Plug size={15} /> },
+  { page: "models", label: "Models", icon: <Cpu size={15} /> },
+  { page: "workflows", label: "Workflows", icon: <CalendarClock size={15} /> },
+  { page: "history", label: "History", icon: <History size={15} /> },
+];
+
+/** The 2.0 workspace: task dashboard, approval centre, memory, skills, integrations, models, workflows, history. */
+function WorkspaceNav() {
+  const { state, page, setPage } = useApp();
+  const running = Object.values(state.plans).filter((p) => p.status === "running" || p.status === "awaiting-approval").length;
+  return (
+    <div className="grid grid-cols-2 gap-1 px-3 pb-3">
+      {PAGES.map((p) => (
+        <button
+          key={p.page}
+          onClick={() => setPage(p.page)}
+          aria-current={page === p.page ? "page" : undefined}
+          className={clsx("flex items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[13px] transition-colors", page === p.page ? "bg-active text-ink" : "text-mute hover:bg-hover hover:text-ink")}
+        >
+          {p.icon}
+          <span className="min-w-0 flex-1 truncate">{p.label}</span>
+          {p.page === "approvals" && state.pendingApprovals > 0 && (
+            <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-warn px-1 text-[10.5px] font-semibold text-black">{state.pendingApprovals}</span>
+          )}
+          {p.page === "tasks" && running > 0 && <span className="h-2 w-2 rounded-full bg-accent" title={`${running} running`} />}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Bottom bar: which models are in use, and the way to settings and keys. */
 function SidebarFooter() {
-  const { state, setPanel } = useApp();
+  const { state, setPanel, setPage } = useApp();
   const status = state.status;
-  const missing = status ? Object.values(status.keys).filter((on) => !on).length : 0;
-  const settingsHint = status?.mock ? "Settings · mock mode until NEBIUS_API_KEY is set" : missing ? `Settings · ${missing} key${missing === 1 ? "" : "s"} not set` : "Settings";
+  const providers = status?.providers ?? [];
   return (
     <div className="flex items-center gap-1 border-t border-line px-3 py-3">
-      <a
-        href="https://tokenfactory.nebius.com"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="flex h-10 min-w-0 shrink items-center gap-2 rounded-xl px-3 ring-1 ring-line transition-colors hover:bg-hover hover:ring-line-strong"
-        title="Models by Nebius Token Factory"
+      <button
+        onClick={() => setPage("models")}
+        className="flex h-10 min-w-0 shrink items-center gap-2 rounded-xl px-3 text-left ring-1 ring-line transition-colors hover:bg-hover hover:ring-line-strong"
+        title="Model providers"
       >
-        <span className="shrink-0 text-[10px] font-semibold tracking-[0.08em] text-faint uppercase">Powered by</span>
-        <NebiusLogo height={14} className="shrink-0" />
-      </a>
-      <IconButton label="Connections" onClick={() => setPanel({ kind: "connections" })} className="ml-auto">
+        <span className={clsx("h-2 w-2 shrink-0 rounded-full", status?.mock ? "bg-warn" : "bg-ok")} />
+        <span className="truncate text-[12px] text-mute">{status?.mock ? "Mock mode · add a model key" : `Models: ${providers.join(", ")}`}</span>
+      </button>
+      <IconButton label="Connections (Composio and MCP)" onClick={() => setPanel({ kind: "connections" })} className="ml-auto">
         <Plug size={18} />
       </IconButton>
-      <IconButton label={settingsHint} onClick={() => setPanel({ kind: "settings" })} className="relative">
+      <IconButton label="Settings" onClick={() => setPanel({ kind: "settings" })}>
         <Settings size={18} />
-        {status && (status.mock || missing > 0) && (
-          <span className={clsx("absolute top-1.5 right-1.5 h-2 w-2 rounded-full ring-2 ring-side", status.mock ? "bg-warn" : "bg-faint")} />
-        )}
       </IconButton>
     </div>
   );
@@ -255,7 +286,7 @@ export function Sidebar() {
               className="top-11 right-0"
               onClose={() => setNewMenu(false)}
               items={[
-                { label: "New bot", onClick: () => setPanel({ kind: "new-bot" }), icon: <Mascot color="#3b82f6" size={18} /> },
+                { label: "New agent", onClick: () => setPanel({ kind: "new-bot" }), icon: <Sparkles size={16} /> },
                 { label: "New room", onClick: () => setPanel({ kind: "new-room" }), icon: <RoomAvatar colors={["#22c55e", "#f59e0b"]} size={18} /> },
               ]}
             />
@@ -265,8 +296,11 @@ export function Sidebar() {
 
       <div className="flex flex-col items-center pt-1 pb-5">
         <Mascot color="#f4f4f4" size={60} />
-        <span className="mt-2 text-[14px] font-medium">OpenCrewBot</span>
+        <span className="mt-2 text-[14px] font-medium">OpenCrewBot 2.0</span>
+        <span className="text-[11.5px] text-faint">Autonomous AI workforce</span>
       </div>
+
+      <WorkspaceNav />
 
       {searching && (
         <div className="px-3 pb-2">

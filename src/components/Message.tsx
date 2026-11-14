@@ -2,33 +2,14 @@
 
 import clsx from "clsx";
 import { Brain, Check, ChevronRight, Code2, Globe, Loader2, MousePointerClick, NotebookPen, ShieldAlert, X } from "lucide-react";
-import { memo, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { useState } from "react";
 import { api } from "@/lib/client/api";
 import { formatCost, formatTokens, timeLabel } from "@/lib/client/format";
 import type { Bot, ChatMessage, Part, Source } from "@/lib/shared/types";
 import { useApp } from "./OpenCrewBotApp";
+import { Markdown } from "./Markdown";
+import { ArtifactLink, PlanCard } from "./PlanView";
 import { BotAvatar, Button, inputClass } from "./ui";
-
-const Markdown = memo(function Markdown({ text }: { text: string }) {
-  return (
-    <div className="prose-chat text-[15px]">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          a: ({ href, children }) => (
-            <a href={href} target="_blank" rel="noopener noreferrer">
-              {children}
-            </a>
-          ),
-        }}
-      >
-        {text}
-      </ReactMarkdown>
-    </div>
-  );
-});
 
 type ToolPart = Extract<Part, { kind: "tool" }>;
 type QuestionPart = Extract<Part, { kind: "question" }>;
@@ -56,13 +37,13 @@ function ApprovalButtons({ message, part }: { message: ChatMessage; part: ToolPa
   return (
     <div className="flex flex-wrap items-center gap-2 border-t border-warn/20 px-3.5 py-2.5">
       <span className="mr-auto flex items-center gap-1.5 text-[13px] font-medium text-warn">
-        <ShieldAlert size={14} /> Allow this action?
+        <ShieldAlert size={14} /> Approve this action? Nothing happens until you do.
       </span>
       <Button size="sm" variant="secondary" disabled={busy} onClick={() => decide(false)}>
-        Deny
+        Reject
       </Button>
       <Button size="sm" variant="primary" disabled={busy} onClick={() => decide(true)}>
-        Allow once
+        Approve
       </Button>
     </div>
   );
@@ -70,8 +51,10 @@ function ApprovalButtons({ message, part }: { message: ChatMessage; part: ToolPa
 
 function ToolChip({ message, part }: { message: ChatMessage; part: ToolPart }) {
   const { state, open: openConversation, setInspector } = useApp();
-  const [open, setOpen] = useState(false);
   const waiting = part.status === "awaiting-approval";
+  const [toggled, setOpen] = useState(false);
+  // An action waiting for approval always shows exactly what it will do.
+  const open = toggled || waiting;
   const expandable = Boolean(part.preview || part.sources?.length);
   const canWatch = part.name.startsWith("browser_") && message.botId && state.liveViews[message.botId] && message.status === "streaming";
 
@@ -110,7 +93,7 @@ function ToolChip({ message, part }: { message: ChatMessage; part: ToolPart }) {
           {part.status === "running" && <Loader2 size={14} className="animate-spin text-mute" aria-label="Running" />}
           {part.status === "done" && <Check size={14} className="text-ok" aria-label="Done" />}
           {part.status === "error" && <X size={14} className="text-danger" aria-label="Failed" />}
-          {part.status === "denied" && <span className="text-[12px] text-faint">Skipped</span>}
+          {part.status === "denied" && <span className="text-[12px] font-medium text-danger">Rejected · not executed</span>}
           {expandable && <ChevronRight size={14} className={clsx("text-faint transition-transform", open && "rotate-90")} aria-hidden />}
         </span>
       </button>
@@ -232,12 +215,29 @@ function routeLabel(message: ChatMessage): string | null {
       return "handed off";
     case "lead":
       return "room lead";
+    case "chief":
+      return "Chief of Staff";
+    case "task":
+      return "task";
+    case "teammate":
+      return "asked by a teammate";
+    case "workflow":
+      return "workflow";
     case "everyone":
       return null;
   }
 }
 
 export function MessageItem({ message, bot, showAuthor }: { message: ChatMessage; bot?: Bot; showAuthor: boolean }) {
+  const { state } = useApp();
+  if (message.role === "notice") {
+    const text = message.parts.map((p) => (p.kind === "text" ? p.text : "")).join("");
+    return (
+      <div className="mx-auto max-w-[620px] rounded-full bg-raised px-4 py-1.5 text-center text-[12.5px] text-mute">
+        <Markdown text={text} />
+      </div>
+    );
+  }
   if (message.role === "user") {
     const text = message.parts.map((p) => (p.kind === "text" ? p.text : "")).join("");
     return (
@@ -255,7 +255,8 @@ export function MessageItem({ message, bot, showAuthor }: { message: ChatMessage
   const uniqueSources = allSources.filter((s, i) => allSources.findIndex((x) => x.url === s.url) === i);
   const lastIndex = message.parts.length - 1;
   const cost = formatCost(message.usage?.costUsd);
-  const route = routeLabel(message);
+  const taskRef = message.route?.taskId && message.route.planId ? state.plans[message.route.planId]?.tasks.find((t) => t.id === message.route?.taskId)?.ref : undefined;
+  const route = message.route?.by === "task" && taskRef ? `task ${taskRef}` : routeLabel(message);
 
   // Words go in bubbles; tool steps and question cards stand on their own between them.
   type Block =
@@ -311,6 +312,14 @@ export function MessageItem({ message, bot, showAuthor }: { message: ChatMessage
             <div key={b} className="w-full max-w-[520px]">
               <QuestionCard message={message} part={block.part} />
             </div>
+          ) : block.part.kind === "plan" ? (
+            <div key={b} className="w-full">
+              <PlanCard planId={block.part.planId} />
+            </div>
+          ) : block.part.kind === "artifact" ? (
+            <div key={b} className="w-full max-w-[520px]">
+              <ArtifactLink title={block.part.title} path={block.part.path} />
+            </div>
           ) : null,
         )}
         {showTyping && (
@@ -327,6 +336,7 @@ export function MessageItem({ message, bot, showAuthor }: { message: ChatMessage
       <div className="mt-1 flex h-4 flex-wrap gap-x-2 pl-2 text-[11.5px] text-faint opacity-0 transition-opacity group-hover:opacity-100">
         <span>{timeLabel(message.createdAt)}</span>
         {message.model && !streaming && <span>{message.model === "mock" ? "mock model" : message.model.split("/").pop()}</span>}
+        {message.fallbackFrom && <span className="text-warn">fell back from {message.fallbackFrom.split("/").pop()}</span>}
         {message.usage && (message.usage.input > 0 || message.usage.output > 0) && (
           <span title={`${message.usage.input} in · ${message.usage.output} out`}>{formatTokens(message.usage.input + message.usage.output)} tokens</span>
         )}

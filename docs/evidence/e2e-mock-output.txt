@@ -1,0 +1,45 @@
+
+# Minimums
+PASS  at least 8 configurable agents  (9)
+PASS  at least 4 rooms  (6)
+PASS  at least 8 skills  (12)
+PASS  three permission levels in use
+PASS  tool catalog lists live and simulated tools
+
+# Plan, parallel tasks, calculations, charts
+PASS  plan finished  (done)
+PASS  two tasks had no dependencies (ran in parallel)
+PASS  analysis output has computed numbers
+PASS  charts were saved as files
+PASS  a consolidated report was saved
+
+# Failure recovery
+PASS  a failed attempt was retried and then succeeded
+PASS  after repeated failures the task was reassigned to another agent
+PASS  a plan with no successful work ends as failed, with the reasons
+
+# Approval enforcement
+PASS  the plan stops and waits for approval before the external action
+PASS  the approval shows a preview of the exact action
+PASS  the rejection is recorded
+PASS  the rejected action did NOT execute (no new 'executed' entry in the audit log)
+PASS  the agent's reply says it was not executed
+PASS  a decided approval cannot be approved later
+
+# Interruption with a new instruction
+PASS  the new instruction changed the running plan
+PASS  the email task was cancelled and never sent
+PASS  a task for the new work was added and done
+
+# Memory
+PASS  the preference was saved to shared memory
+PASS  provenance is recorded (who, why, where)
+PASS  after an edit, a different agent sees the new text and not the old
+
+# Agent factory and workflows
+PASS  an agent was created from a plain-language description
+PASS  a workflow was scheduled
+PASS  a manual run finished and is in the history with its report
+PASS  pause clears the next run; resume sets it again
+
+All checks passed

@@ -39,13 +39,13 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         </p>
         <ul className="mt-3 divide-y divide-line rounded-2xl bg-raised">
           <KeyRow
-            name="Nebius Token Factory"
-            envVar="NEBIUS_API_KEY"
-            ok={Boolean(status?.keys.nebius)}
-            what="The open-source models every bot runs on. Without it, bots use a scripted mock model."
-            href="https://tokenfactory.nebius.com"
+            name="Model providers"
+            envVar="GROQ_API_KEY / GEMINI_API_KEY / …"
+            ok={Boolean(status && !status.mock)}
+            what="Groq, Google Gemini, OpenRouter, Nebius, OpenAI, Anthropic or a local Ollama server. Any one is enough; with none, agents use a scripted mock model. See the Models page."
+            href="https://console.groq.com/keys"
           />
-          <KeyRow name="Tavily" envVar="TAVILY_API_KEY" ok={Boolean(status?.keys.tavily)} what="Web search, page reading and site crawls." href="https://app.tavily.com" />
+          <KeyRow name="Tavily" envVar="TAVILY_API_KEY" ok={Boolean(status?.keys.tavily)} what="Optional. Richer web search and site crawls. Without it, search uses DuckDuckGo with no key." href="https://app.tavily.com" />
           <KeyRow
             name="Browserbase"
             envVar="BROWSERBASE_API_KEY"

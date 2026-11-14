@@ -1,6 +1,6 @@
 // Client state: one reducer folds the bootstrap payload, transcript loads and
 // the live SSE events into what the UI renders.
-import type { AppStatus, Bot, ChatMessage, ConversationId, ConversationSummary, ModelOption, Room, ServerEvent } from "@/lib/shared/types";
+import type { AppStatus, Bot, ChatMessage, ConversationId, ConversationSummary, ModelOption, Plan, Room, ServerEvent } from "@/lib/shared/types";
 import { messagePreview } from "./format";
 
 export interface AppState {
@@ -21,6 +21,11 @@ export interface AppState {
   liveViews: Record<string, string>;
   /** Bumped when apps or MCP servers change, so views refetch them. */
   connectionsVersion: number;
+  /** Task plans by id, kept live by the server's plan events. */
+  plans: Record<string, Plan>;
+  /** Counters bumped by server events, so workspace pages know when to refetch. */
+  versions: { approvals: number; workflows: number; memory: number; skills: number; integrations: number };
+  pendingApprovals: number;
 }
 
 export const initialState: AppState = {
@@ -36,6 +41,9 @@ export const initialState: AppState = {
   counted: {},
   liveViews: {},
   connectionsVersion: 0,
+  plans: {},
+  versions: { approvals: 0, workflows: 0, memory: 0, skills: 0, integrations: 0 },
+  pendingApprovals: 0,
 };
 
 export type Action =
@@ -47,7 +55,10 @@ export type Action =
       models: ModelOption[];
       conversations: ConversationSummary[];
       liveViews: Record<string, string>;
+      plans?: Plan[];
+      pendingApprovals?: number;
     }
+  | { type: "pending"; count: number }
   | { type: "open"; id: ConversationId | null }
   | { type: "models"; models: ModelOption[] }
   | { type: "transcript"; id: ConversationId; messages: ChatMessage[]; running: string[] }
@@ -91,8 +102,12 @@ export function reducer(state: AppState, action: Action): AppState {
         models: action.models,
         summaries,
         liveViews: action.liveViews,
+        plans: { ...Object.fromEntries((action.plans ?? []).map((p) => [p.id, p])), ...state.plans },
+        pendingApprovals: action.pendingApprovals ?? state.pendingApprovals,
       };
     }
+    case "pending":
+      return { ...state, pendingApprovals: action.count };
     case "models":
       return { ...state, models: action.models };
     case "open": {
@@ -166,6 +181,18 @@ function applyEvent(state: AppState, event: ServerEvent): AppState {
     }
     case "connections-changed":
       return { ...state, connectionsVersion: state.connectionsVersion + 1 };
+    case "plan":
+      return { ...state, plans: { ...state.plans, [event.plan.id]: event.plan } };
+    case "approvals-changed":
+      return { ...state, versions: { ...state.versions, approvals: state.versions.approvals + 1 } };
+    case "workflows-changed":
+      return { ...state, versions: { ...state.versions, workflows: state.versions.workflows + 1 } };
+    case "memory-scope-changed":
+      return { ...state, versions: { ...state.versions, memory: state.versions.memory + 1 } };
+    case "skills-changed":
+      return { ...state, versions: { ...state.versions, skills: state.versions.skills + 1 } };
+    case "integrations-changed":
+      return { ...state, versions: { ...state.versions, integrations: state.versions.integrations + 1 } };
     case "bots-changed":
     case "rooms-changed":
       // The provider refetches the bootstrap payload for these.

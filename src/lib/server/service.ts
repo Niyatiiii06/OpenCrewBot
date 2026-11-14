@@ -8,8 +8,12 @@ import { InputError } from "./errors";
 import * as store from "./db";
 import { publish } from "./bus";
 import { DEFAULT_MODEL } from "./models";
-import { deleteWorkspace, writeMemory } from "./memory-files";
+import { deleteRoomMemory, deleteWorkspace, writeMemory } from "./memory-files";
 import { forgetConversation, resetBot, runTurn, runningBots, stopConversation } from "./runtime";
+import { activePlanIn, amendPlan, cancelPlan, lastPlanIn, recoverPlans, resumePlan, startPlan } from "./engine";
+import { expirePendingApprovals } from "./permissions";
+import { applyKeyAliases } from "./providers";
+import { recoverWorkflowRuns, startScheduler } from "./workflows";
 import { messagePreview } from "@/lib/shared/preview";
 import { roomConversationId, runRoom } from "./rooms";
 
@@ -21,8 +25,14 @@ const g = globalThis as unknown as { __opencrewbotBoot?: Promise<void> };
 
 export function boot(): Promise<void> {
   g.__opencrewbotBoot ??= (async () => {
+    applyKeyAliases();
     await sweepInterrupted();
+    // Approvals that were waiting when the server stopped can never be granted late.
+    await expirePendingApprovals();
     await seed();
+    await recoverPlans();
+    await recoverWorkflowRuns();
+    startScheduler();
   })();
   return g.__opencrewbotBoot;
 }
@@ -41,59 +51,144 @@ async function sweepInterrupted() {
   }
 }
 
-const SEED_MARKER = join(DATA_DIR, ".seeded");
+const SEED_MARKER = join(DATA_DIR, ".seeded-v2");
 
-async function seed() {
-  if (existsSync(SEED_MARKER)) return;
-  const tools = { webSearch: true, memory: true, codeMode: false, browser: false, askUser: true };
-  const scout = await createBot({
+type SeedBot = Omit<BotInput, "model" | "pinned" | "approval" | "tools" | "color"> & Partial<Pick<BotInput, "approval" | "pinned">> & { color: string; tools: Partial<Bot["tools"]> };
+
+const SEED_TOOLS: Bot["tools"] = { webSearch: false, memory: true, codeMode: false, browser: false, askUser: true, collaboration: true, dataAnalysis: false, github: false, email: false, slack: false, notion: false, artifacts: true };
+
+const SEED_BOTS: SeedBot[] = [
+  {
+    name: "Chief",
+    title: "Chief of Staff",
+    role: "chief",
+    description: "Turns one instruction into a task plan, assigns the right agents, tracks the work and writes the final answer.",
+    instructions: "You run the team. Split large requests into clear tasks, give each to the agent whose tools fit, run independent tasks in parallel, and consolidate only what the tasks produced. Answer simple questions yourself.",
+    emoji: "🧑‍✈️",
+    color: "#111827",
+    tools: {},
+    skills: ["daily-summary"],
+    outputFormat: "Summary first, then sections. End with what was not completed, if anything.",
+    pinned: true,
+  },
+  {
     name: "Scout",
     title: "Research",
     description: "Finds things out on the web and comes back with sourced answers.",
-    instructions:
-      "Research before answering anything time-sensitive. Search, read the best two or three sources, then answer with the URLs you used. Say plainly when sources disagree or you couldn't verify something.",
+    instructions: "Research before answering anything time-sensitive. Search, read the best two or three sources, then answer with the URLs you used. Say plainly when sources disagree or you couldn't verify something.",
     emoji: "🔭",
     color: "#2f7df6",
-    model: DEFAULT_MODEL,
-    tools: { ...tools, codeMode: true },
-    approval: "ask",
-    pinned: true,
-  });
-  const quill = await createBot({
+    tools: { webSearch: true, codeMode: true },
+    skills: ["market-research", "competitor-analysis"],
+    outputFormat: "Findings as bullets, each with its source link.",
+  },
+  {
     name: "Quill",
-    title: "Writing",
-    description: "Turns notes and research into clear posts, docs and emails.",
-    instructions:
-      "Write in plain, specific language. Match the person's voice once you know it, and keep their style preferences in memory. Offer one tight draft, not three options.",
+    title: "Content",
+    description: "Turns notes and research into campaigns, content calendars, posts and emails.",
+    instructions: "Write in plain, specific language. Match the person's voice once you know it, and keep their style preferences in memory. Offer one tight draft, not three options.",
     emoji: "✒️",
     color: "#e0663d",
-    model: DEFAULT_MODEL,
-    tools: { ...tools, webSearch: false },
-    approval: "ask",
-    pinned: false,
-  });
-  const atlas = await createBot({
+    tools: {},
+    skills: ["campaign-strategy", "content-calendar", "email-drafting"],
+    outputFormat: "Strategy in a few lines, then the plan as a Markdown table.",
+  },
+  {
     name: "Atlas",
-    title: "Planning",
-    description: "Breaks goals into steps, keeps track of decisions, and pulls in teammates.",
-    instructions:
-      "Turn vague goals into a short, ordered plan with owners. Keep decisions and open questions in memory. In rooms, hand research to @scout and drafting to @quill.",
+    title: "Strategy",
+    description: "Shapes positioning, pricing and plans; turns findings into decisions and presentations.",
+    instructions: "Turn findings into a clear recommendation with the reasoning and the trade-offs. Record decisions in memory with scope 'decision'.",
     emoji: "🧭",
     color: "#1f9d6b",
-    model: DEFAULT_MODEL,
-    tools,
-    approval: "ask",
-    pinned: false,
-  });
-  await createRoom({
-    name: "Studio",
-    topic: "Content and launches",
-    emoji: "🎬",
-    memberIds: [atlas.id, scout.id, quill.id],
-    leadId: atlas.id,
-    responder: "auto",
-    pinned: true,
-  });
+    tools: { webSearch: true },
+    skills: ["financial-modelling", "presentation-creation"],
+    outputFormat: "Recommendation, reasoning, risks, next steps.",
+  },
+  {
+    name: "Dex",
+    title: "Data analysis",
+    description: "Analyses spreadsheets, calculates metrics and funnels, and draws charts.",
+    instructions: "Compute every number with analyze_spreadsheet or code; never estimate. Show the calculation behind each headline number and name data-quality problems.",
+    emoji: "📊",
+    color: "#7a5af5",
+    tools: { dataAnalysis: true, codeMode: true },
+    skills: ["data-analysis"],
+    outputFormat: "Headline numbers, a table per breakdown, the charts, then recommendations tied to the numbers.",
+  },
+  {
+    name: "Forge",
+    title: "Engineering",
+    description: "Inspects GitHub repositories, reviews code and proposes changes as issues.",
+    instructions: "Inspect before you comment. Cite the file for every finding. Propose changes as issues and wait for approval; never change a repository on your own.",
+    emoji: "🛠️",
+    color: "#475569",
+    tools: { github: true, webSearch: true },
+    skills: ["code-review", "repo-monitoring"],
+    outputFormat: "Findings by severity, each with file, evidence and suggested fix.",
+  },
+  {
+    name: "Echo",
+    title: "Outreach",
+    description: "Drafts and sends email, and posts updates to Slack and Notion. Controlled access.",
+    instructions: "Write short, specific messages. Show the draft, then send. If the person rejects a send, do not retry: report that it was not sent.",
+    emoji: "📨",
+    color: "#d9488b",
+    tools: { email: true, slack: true, notion: true },
+    skills: ["email-drafting", "lead-generation"],
+    approval: "controlled",
+    outputFormat: "Subject, body, then one line on what was sent or not sent.",
+  },
+  {
+    name: "Vera",
+    title: "Review and QA",
+    description: "Verifies claims and checks work against its sources before it ships.",
+    instructions:
+      "Check each claim against its source. Re-run any numbers yourself with analyze_spreadsheet or code rather than asking for the data; the files the author used are available to you too. Start with VERIFIED or NEEDS CHANGES, then list each problem with the evidence. If you cannot check something, say so.",
+    emoji: "🧪",
+    color: "#b45309",
+    tools: { webSearch: true, dataAnalysis: true, codeMode: true },
+    skills: [],
+    outputFormat: "First line VERIFIED or NEEDS CHANGES, then numbered issues.",
+  },
+  {
+    name: "Sage",
+    title: "Reporting",
+    description: "Writes daily summaries and status reports. Full access to its own tools.",
+    instructions: "Summarise what happened, what changed and what needs a decision. Keep it to one screen.",
+    emoji: "🗂️",
+    color: "#0891b2",
+    tools: { slack: true },
+    skills: ["daily-summary", "presentation-creation"],
+    approval: "full",
+    outputFormat: "Three sections: done, changed, needs a decision.",
+  },
+];
+
+const SEED_ROOMS: { name: string; topic: string; emoji: string; members: string[]; responder: Room["responder"]; pinned?: boolean }[] = [
+  { name: "Command Room", topic: "Give the Chief of Staff any business problem", emoji: "🎯", members: ["Chief", "Scout", "Quill", "Atlas", "Dex", "Forge", "Echo", "Vera", "Sage"], responder: "chief", pinned: true },
+  { name: "Market Intelligence", topic: "Markets, competitors and trends", emoji: "🌍", members: ["Chief", "Scout", "Atlas", "Vera", "Sage"], responder: "chief" },
+  { name: "Campaign Studio", topic: "Campaigns, content calendars and launches", emoji: "🎬", members: ["Chief", "Quill", "Scout", "Atlas", "Vera"], responder: "chief" },
+  { name: "Sales and Data", topic: "Pipeline, spreadsheets and outreach", emoji: "📈", members: ["Chief", "Dex", "Echo", "Atlas", "Vera"], responder: "chief" },
+  { name: "Engineering", topic: "Repositories and code review", emoji: "⚙️", members: ["Chief", "Forge", "Vera"], responder: "chief" },
+  { name: "Studio", topic: "Open chat: mention an agent or let the lead answer", emoji: "💬", members: ["Atlas", "Scout", "Quill"], responder: "auto" },
+];
+
+/** First run: a Chief of Staff, eight specialists and six rooms. Existing agents and
+ * rooms (from the original app's data) are kept; only missing ones are added. */
+async function seed() {
+  if (existsSync(SEED_MARKER)) return;
+  const byName = new Map((await store.listBots()).map((b) => [b.name, b]));
+  for (const def of SEED_BOTS) {
+    if (byName.has(def.name)) continue;
+    const bot = await createBot({ approval: "ask", pinned: false, ...def, model: DEFAULT_MODEL, modelMode: "auto", tools: { ...SEED_TOOLS, ...def.tools }, createdBy: "seed" });
+    byName.set(bot.name, bot);
+  }
+  const rooms = new Set((await store.listRooms()).map((r) => r.name));
+  for (const def of SEED_ROOMS) {
+    if (rooms.has(def.name)) continue;
+    const memberIds = def.members.map((n) => byName.get(n)?.id).filter((id): id is string => Boolean(id));
+    await createRoom({ name: def.name, topic: def.topic, emoji: def.emoji, memberIds, leadId: memberIds[0] ?? null, responder: def.responder, pinned: Boolean(def.pinned) });
+  }
   writeFileSync(SEED_MARKER, new Date().toISOString());
 }
 
@@ -119,14 +214,15 @@ function validateBot(input: Partial<BotInput>) {
 
 export async function createBot(input: BotInput): Promise<Bot> {
   validateBot(input);
-  const bot: Bot = {
+  const bot = store.normalizeBot({
+    createdBy: "user",
     ...input,
     id: randomUUID().slice(0, 8),
     name: input.name.trim(),
     connections: input.connections ?? [],
     handle: await uniqueHandle(input.handle || input.name),
     createdAt: new Date().toISOString(),
-  };
+  } as Bot);
   await store.saveBot(bot);
   writeMemory(bot.id, `# ${bot.name}'s memory\n\n`);
   publish({ type: "bots-changed" });
@@ -143,6 +239,7 @@ export async function updateBot(id: string, patch: Partial<BotInput>): Promise<B
     id: bot.id,
     createdAt: bot.createdAt,
     tools: { ...bot.tools, ...(patch.tools ?? {}) },
+    limits: { ...bot.limits, ...(patch.limits ?? {}) },
     handle: patch.handle !== undefined || patch.name !== undefined ? await uniqueHandle(patch.handle || patch.name || bot.handle, id) : bot.handle,
   };
   await store.saveBot(next);
@@ -207,6 +304,7 @@ export async function deleteRoom(id: string): Promise<void> {
   await stopConversation(conversationId);
   await store.deleteRoomRow(id);
   await store.clearMessages(conversationId);
+  deleteRoomMemory(id);
   publish({ type: "rooms-changed" });
 }
 
@@ -243,14 +341,33 @@ export async function sendMessage(conversationId: ConversationId, text: string):
   publish({ type: "message", message });
 
   // The reply streams over SSE; the request returns as soon as it's queued.
-  if (bot) void runTurn({ bot, conversationId, content }).catch(() => {});
+  if (bot) void directMessage(bot, conversationId, content).catch(() => {});
   if (room) void runRoom(room, message).catch(() => {});
   return message;
 }
 
+/** A direct message. The Chief of Staff plans real work with the whole team; everyone else just answers. */
+async function directMessage(bot: Bot, conversationId: ConversationId, content: string) {
+  if (bot.role === "chief") {
+    const active = activePlanIn(conversationId);
+    if (active) return void (await amendPlan(active.id, content));
+    const last = await lastPlanIn(conversationId);
+    if (last?.status === "interrupted" && /^\s*(resume|continue)\b/i.test(content)) return void (await resumePlan(last.id));
+    if (await startPlan({ conversationId, instruction: content, chief: bot })) return;
+  }
+  await runTurn({ bot, conversationId, content });
+}
+
+/** Stop everything in a conversation: running replies and any plan. */
+export async function stopEverything(conversationId: ConversationId): Promise<void> {
+  const active = activePlanIn(conversationId);
+  if (active) await cancelPlan(active.id, "Stopped by you.");
+  await stopConversation(conversationId);
+}
+
 export async function clearConversation(conversationId: ConversationId): Promise<void> {
   parseConversation(conversationId);
-  await stopConversation(conversationId);
+  await stopEverything(conversationId);
   await store.clearMessages(conversationId);
   await store.bumpGeneration(conversationId);
   forgetConversation(conversationId);

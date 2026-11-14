@@ -115,7 +115,7 @@ function EmptyState({ bot, room, members, onPick }: { bot?: Bot; room?: Room; me
       {room && (
         <p className="mt-3 text-[13px] leading-relaxed text-faint">
           @mention a bot to choose who answers. Otherwise{" "}
-          {room.responder === "auto" ? "Jev routes the message" : room.responder === "lead" ? "the lead answers" : "everyone answers"}.
+          {room.responder === "chief" ? "the Chief of Staff turns it into a task plan" : room.responder === "auto" ? "Jev routes the message" : room.responder === "lead" ? "the lead answers" : "everyone answers"}.
         </p>
       )}
       <div className="mt-7 flex flex-wrap justify-center gap-2">
@@ -335,9 +335,10 @@ function Composer({
 }
 
 function shouldShowAuthor(messages: ChatMessage[], i: number, isRoom: boolean): boolean {
-  if (!isRoom) return false;
   const m = messages[i];
   if (m.role !== "bot") return false;
+  // In a direct message, names appear once a teammate has joined in (tasks, questions).
+  if (!isRoom && !messages.some((x) => x.role === "bot" && x.botId !== messages.find((y) => y.role === "bot")?.botId)) return false;
   const prev = messages[i - 1];
   return !prev || prev.role !== "bot" || prev.botId !== m.botId;
 }

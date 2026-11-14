@@ -1,0 +1,24 @@
+ ✓ tests/core.test.ts > permission levels > Ask first: an external action always asks 2ms
+ ✓ tests/core.test.ts > permission levels > Controlled: only pre-approved recipients run without asking, within the limit 1ms
+ ✓ tests/core.test.ts > permission levels > Full access: runs without asking; a tool-level block still wins 0ms
+ ✓ tests/core.test.ts > permission levels > read-only tools never ask 0ms
+ ✓ tests/core.test.ts > approval enforcement > a rejected action is never executed and is recorded 104ms
+ ✓ tests/core.test.ts > approval enforcement > a blocked tool is refused without asking and logged 2ms
+ ✓ tests/core.test.ts > approval enforcement > stopping the run cancels a waiting approval 110ms
+ ✓ tests/core.test.ts > rule planner > splits a mixed request into parallel gathering, dependent writing, review, then a gated action 6ms
+ ✓ tests/core.test.ts > rule planner > answers a short question directly instead of planning 1ms
+ ✓ tests/core.test.ts > rule planner > asks for a new agent when nobody has the tool 0ms
+ ✓ tests/core.test.ts > data analysis > parses quoted CSV 1ms
+ ✓ tests/core.test.ts > data analysis > computes the funnel and totals of the sample file 50ms
+ ✓ tests/core.test.ts > data analysis > draws an SVG chart 0ms
+ ✓ tests/core.test.ts > data analysis > refuses files outside the data folders 1ms
+ ✓ tests/core.test.ts > memory > records who saved what and why, and edits are what agents read next 5ms
+ ✓ tests/core.test.ts > memory > never stores secrets 2ms
+ ✓ tests/core.test.ts > skills > ships at least eight skills 1ms
+ ✓ tests/core.test.ts > skills > picks skills by the words in the task, and loads a new skill without a restart 10ms
+ ✓ tests/core.test.ts > workflow schedules > parses plain-language schedules 1ms
+ ✓ tests/core.test.ts > workflow schedules > computes the next run 0ms
+ ✓ tests/core.test.ts > GitHub integration (API stubbed) > normalises repository names 1ms
+ ✓ tests/core.test.ts > GitHub integration (API stubbed) > reports structural findings from what the API returns 9ms
+ Test Files  1 passed (1)
+      Tests  22 passed (22)

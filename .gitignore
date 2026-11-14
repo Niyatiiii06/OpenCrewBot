@@ -48,3 +48,7 @@ next-env.d.ts
 .gstack/
 
 
+
+# test data folders
+/data-test/
+/data-*/
