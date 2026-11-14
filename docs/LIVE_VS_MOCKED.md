@@ -6,7 +6,7 @@ Nothing in this project pretends to be live. An action that cannot reach a real 
 
 | Integration | How it connects | Live when | Without credentials | Verified so far |
 | --- | --- | --- | --- | --- |
-| GitHub: inspect repository, read file | GitHub REST API | Always (public repositories, 60 requests/hour without a token) | Still live for reading | Logic unit-tested with stubbed API responses. **Live call not run by the build environment** (its network blocks api.github.com). Run "Test connection" and demo 4. |
+| GitHub: inspect repository, read file | GitHub REST API | Always (public repositories, 60 requests/hour without a token) | Still live for reading | **Verified live, 14 Nov 2026**: real data returned for a public repository; a 404 for an unreadable one was reported honestly, not invented. A private repository needs `GITHUB_TOKEN`. |
 | GitHub: open issue | GitHub REST API | `GITHUB_TOKEN` set | Simulated: saved to `data/outbox/*.json` | Simulated path verified end to end (approve and reject). Live path to be verified with a token. |
 | Gmail: send email | SMTP (`smtp.gmail.com`) through nodemailer | `GMAIL_USER` + `GMAIL_APP_PASSWORD` set | Simulated: saved to `data/outbox/*.eml` | Simulated path verified end to end. Live path to be verified with an app password ("Test connection" signs in without sending). |
 | Slack: post message | Incoming webhook | `SLACK_WEBHOOK_URL` set | Simulated: saved to `data/outbox` | Simulated path only. |

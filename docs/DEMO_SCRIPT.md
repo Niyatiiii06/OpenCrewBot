@@ -36,9 +36,13 @@ Show: the `analyze_spreadsheet` step, the funnel table with the calculated perce
 
 Room: **Engineering**.
 
-> Inspect the repository github.com/Studio1-OSS/OpenCrewBot, review its structure and code quality, and open an issue for the most important finding.
+> Inspect the repository github.com/<your-username>/OpenCrewBot, review its structure and code quality, and open an issue for the most important finding.
 
-Show: the inspection findings with evidence; the plan stopping at "Needs approval"; the preview of the exact issue; press **Approve** (with a token the issue is created; without one it is saved to the outbox and labelled SIMULATED).
+Use **your own** repository here. Opening an issue on somebody else's repository posts to their project, and the original authors did not ask for automated issues.
+
+Show: the inspection findings with evidence; the plan stopping at "Needs approval"; the preview of the exact issue; press **Approve** (with a `GITHUB_TOKEN` the issue is created in your repository; without one it is saved to `data/outbox` and labelled SIMULATED).
+
+Reading a repository needs no token, but it must be **public** (a private repository answers 404 to an anonymous request, which the agent will report honestly). To read a private repository, put a token in `.env` or on the Integrations page.
 
 ## 5. Recurring competitor monitoring
 

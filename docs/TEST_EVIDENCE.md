@@ -118,6 +118,7 @@ Run on Windows, in the fork's own clone, with a free **Groq** key and a free **G
 | Review loop | Vera answered **NEEDS CHANGES**; the engine automatically added **T5 "Revise: Sales Funnel and Conversion Analysis"** for the author, ran it, and only then consolidated |
 | Consolidation | One report saved as an artifact, with a **"Not Completed"** section stating honestly what could not be verified |
 | Cost | 199,667 tokens over the whole plan; $0.10 at list prices, $0 on Groq's free tier |
+| **GitHub, live** | `github_inspect_repo` on `Studio1-OSS/OpenCrewBot` returned real API data (default branch, 17 stars, 1 open issue, description). A second call against a repository that was not publicly readable returned `GitHub 404: Not Found`, and the agent reported that plainly instead of inventing findings. |
 
 ### A bug this run found, and the fix
 
@@ -141,6 +142,7 @@ In the same run the reviewer agent asked for the CSV to be uploaded, because it 
 
 ## Not covered by these runs
 
-- Live GitHub API, DuckDuckGo web search, Gmail SMTP, Slack, Notion and MCP servers. Their simulated paths are covered, and the GitHub logic is unit-tested against stubbed API responses, but no live call to those services has been made yet.
+- Writing to GitHub (opening an issue) with a token. Reading is verified live; the write path is covered by the simulated run and the approval tests.
+- DuckDuckGo web search, Gmail SMTP, Slack, Notion and MCP servers. Their simulated paths are covered, but no live call to those services has been made yet.
 
 To close these gaps: press **Test connection** on the Integrations page for each service you configure, run demos 1, 4, 5 and 7 in [DEMO_SCRIPT.md](DEMO_SCRIPT.md), and add what you observe to this file.
