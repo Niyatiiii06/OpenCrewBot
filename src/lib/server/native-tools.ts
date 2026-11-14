@@ -30,7 +30,6 @@ const text = (v: unknown) => String(v ?? "");
 
 define("web_search", { label: "Search the web", group: "Research", risk: "read", description: "Search the web and return titles, links and snippets." });
 define("read_page", { label: "Read a web page", group: "Research", risk: "read", description: "Fetch a public page and return its text." });
-define("crawl_site", { label: "Crawl a site", group: "Research", risk: "read", description: "Follow links on one site and read several pages (Tavily only)." });
 define("memory_add", { label: "Save to memory", group: "Memory", risk: "local", description: "Add one line to the agent's own memory or to a shared memory file." });
 define("memory_edit", { label: "Edit memory", group: "Memory", risk: "local", description: "Correct or remove a line in a memory file." });
 define("use_skill", { label: "Load a skill", group: "Skills", risk: "read", description: "Load the full instructions of a skill from the library." });
@@ -91,11 +90,11 @@ export async function toolCatalog(): Promise<ToolInfo[]> {
     if (name === "slack_post") return { live: stateOf("slack")?.state === "live", note: stateOf("slack")?.detail };
     if (name === "notion_create_page") return { live: stateOf("notion")?.state === "live", note: stateOf("notion")?.detail };
     if (name === "github_create_issue") return { live: Boolean(stateOf("github")?.fields[0]?.set), note: "Needs a GitHub token; simulated without one." };
-    if (name === "crawl_site") return { live: keys.tavily(), note: "Needs TAVILY_API_KEY." };
     if (name === "browser_*") return { live: keys.browserbase(), note: "Needs BROWSERBASE_API_KEY." };
     if (name === "COMPOSIO_*") return { live: keys.composio(), note: "Needs COMPOSIO_API_KEY." };
     if (name === "mcp_*") return { live: stateOf("mcp")?.state === "live", note: stateOf("mcp")?.detail };
-    if (name === "web_search" || name === "read_page") return { live: true, note: keys.tavily() ? "Tavily" : "DuckDuckGo and direct fetch, no key" };
+    if (name === "web_search") return { live: true, note: keys.tavily() ? "Tavily API" : "keyless engines, which search sites often block" };
+    if (name === "read_page") return { live: true, note: "direct fetch, no key" };
     return { live: true };
   };
   return [...TOOL_META.entries()].map(([name, m]) => ({ name, label: m.label, description: m.description, group: m.group, risk: m.risk, ...live(name) }));
@@ -201,7 +200,7 @@ export function buildNativeTools(bot: Bot): NativeToolset {
     },
   });
 
-  if (bot.tools.webSearch && !keys.tavily()) {
+  if (bot.tools.webSearch) {
     tools.web_search = createTool({
       id: "web_search",
       description: "Search the web. Returns titles, URLs and snippets. Open the best results with read_page before relying on them.",

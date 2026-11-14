@@ -213,8 +213,8 @@ export type RoutingTier = "fast" | "balanced" | "strong";
 /** Per provider, what counts as fast / balanced / strong, best match first. */
 const TIER_PREFERENCES: Record<string, Record<RoutingTier, RegExp[]>> = {
   groq: {
-    fast: [/gpt-oss-20b$/, /llama-3\.1-8b-instant/, /gpt-oss-120b/],
-    balanced: [/gpt-oss-120b/, /llama-3\.3-70b/, /qwen3\.8/, /gpt-oss-20b$/],
+    fast: [/gpt-oss-120b/, /llama-3\.3-70b/, /gpt-oss-20b$/, /llama-3\.1-8b-instant/],
+    balanced: [/gpt-oss-120b/, /llama-3\.3-70b/, /qwen3\.8/],
     strong: [/gpt-oss-120b/, /qwen3\.8/, /llama-3\.3-70b/],
   },
   google: {

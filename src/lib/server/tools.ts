@@ -3,7 +3,6 @@
 import type { ToolsInput } from "@mastra/core/agent";
 import { createCodeMode } from "@mastra/core/tools";
 import type { ToolCategory } from "@mastra/core/agent-controller";
-import { createTavilyCrawlTool, createTavilyExtractTool, createTavilySearchTool } from "@mastra/tavily";
 import { QuickJsCodeModeTransport } from "@mastra/quickjs";
 import type { Bot, Source } from "@/lib/shared/types";
 import { keys } from "./config";
@@ -12,15 +11,6 @@ import { buildNativeTools } from "./native-tools";
 import { TOOL_META } from "./permissions";
 
 export const CODE_MODE_TOOL = "execute_typescript";
-
-function webTools(): ToolsInput {
-  const apiKey = process.env.TAVILY_API_KEY;
-  return {
-    web_search: createTavilySearchTool({ apiKey }),
-    read_page: createTavilyExtractTool({ apiKey }),
-    crawl_site: createTavilyCrawlTool({ apiKey }),
-  };
-}
 
 export interface BotToolset {
   tools: ToolsInput;
@@ -35,12 +25,8 @@ export function buildTools(bot: Bot): BotToolset {
   const instructions: string[] = [];
   const capabilities: string[] = [];
 
-  if (bot.tools.webSearch && keys.tavily()) {
-    Object.assign(tools, webTools());
-    capabilities.push("Search the web (web_search), read pages (read_page) and crawl sites (crawl_site). Cite the URLs you used.");
-  }
   // 2.0 tools: scoped memory, skills, data analysis, GitHub, email, Slack, Notion,
-  // collaboration, and a keyless web search when there is no Tavily key.
+  // collaboration, and web search (Tavily when a key is set, keyless engines otherwise).
   const native = buildNativeTools(bot);
   Object.assign(tools, native.tools);
   capabilities.push(...native.capabilities);

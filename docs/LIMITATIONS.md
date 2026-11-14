@@ -25,8 +25,10 @@ See [LIVE_VS_MOCKED.md](LIVE_VS_MOCKED.md). Run the "Test connection" buttons an
 - **GitHub write access is limited to opening issues.** No commits, branches or pull requests. Private repositories need a token.
 - **Slack is post-only** (incoming webhook). **Notion is create-page-only**, with Markdown reduced to headings, bullets and paragraphs.
 - **Gmail is send-only** over SMTP. No reading the inbox.
-- **Web search without a key uses DuckDuckGo's HTML page**, which can rate-limit or change. Tavily is supported for reliability.
 - **Controlled access pre-approvals** cover email recipient domains and GitHub repositories. Slack and Notion have no pre-approval rule, so under Controlled access they always ask (unless set to "never ask" at tool level).
+- **Google Gemini rejects some tool schemas.** One of the agent harness's built-in tool definitions uses a union type that Google's function-calling API refuses (`Invalid value at 'tools[0]...enum[0]' (TYPE_STRING), false`), so a turn that falls back to Gemini while tools are available can fail and move on to the next model. Groq is therefore first in every routing tier. Gemini works for turns without that tool in play. The project's own tools were checked and are all accepted by both providers.
+- **Keyless web search is usually blocked.** DuckDuckGo, Mojeek and Brave all refuse the scraped requests (verified 15 Nov 2026: three returned nothing, one returned HTTP 429). Set `TAVILY_API_KEY` — the free tier gives 1,000 searches a month — and search goes through Tavily's API instead. Without a key the agents report that search is unavailable rather than inventing sources.
+- **Groq's smaller models have a small context window.** `gpt-oss-20b` answers "Request too large" for a task brief that carries earlier results, so the routing tiers prefer `gpt-oss-120b`.
 - **Cost figures are estimates** from list prices; free-tier usage shows $0. Models whose price is unknown show no cost.
 - **Collaboration budgets are fixed** per plan (4 delegations, 8 agent-to-agent messages, 14 tasks, depth 2).
 - **Credentials saved in the app** are encrypted with a key stored in the data folder. Anyone with access to the machine and that folder can decrypt them; this protects against casual reading and accidental commits, not a compromised machine.

@@ -351,26 +351,129 @@ export interface SearchHit {
 const decode = (s: string) =>
   s.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
 
-/** Search with DuckDuckGo's HTML page. Free and keyless; used when no Tavily key is set. */
-export async function searchWeb(query: string, max = 6): Promise<SearchHit[]> {
-  const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
-    headers: { "User-Agent": "Mozilla/5.0 (compatible; OpenCrewBot/2.0; +https://github.com/Studio1-OSS/OpenCrewBot)", "Accept-Language": "en" },
+const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+/** One keyless search engine: how to ask it, and how to read its answer. */
+interface Engine {
+  name: string;
+  url: string;
+  /** Sent as a form POST when set, otherwise the query goes in the URL. */
+  form?: boolean;
+  /** Groups: 1 = link, 2 = title, 3 = snippet (optional). */
+  pattern: RegExp;
+}
+
+// Scraped pages change without notice, so several engines are tried in turn and
+// the first that answers wins. Set TAVILY_API_KEY for a supported search API.
+const ENGINES: Engine[] = [
+  {
+    name: "DuckDuckGo Lite",
+    url: "https://lite.duckduckgo.com/lite/",
+    form: true,
+    pattern: /<a[^>]+class="result-link"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]{0,800}?<td[^>]*class="result-snippet"[^>]*>([\s\S]*?)<\/td>/g,
+  },
+  {
+    name: "DuckDuckGo HTML",
+    url: "https://html.duckduckgo.com/html/",
+    form: true,
+    pattern: /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]{0,1200}?<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g,
+  },
+  {
+    name: "Mojeek",
+    url: "https://www.mojeek.com/search?q=",
+    pattern: /<h2><a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a><\/h2>[\s\S]{0,600}?<p[^>]*class="s"[^>]*>([\s\S]*?)<\/p>/g,
+  },
+  {
+    name: "Brave",
+    url: "https://search.brave.com/search?q=",
+    pattern: /<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>[\s\S]{0,200}?<div[^>]+class="[^"]*title[^"]*"[^>]*>([\s\S]*?)<\/div>[\s\S]{0,600}?<div[^>]+class="[^"]*snippet-description[^"]*"[^>]*>([\s\S]*?)<\/div>/g,
+  },
+];
+
+/** Pull the real destination out of a results-page link. */
+function resolveLink(raw: string): string | null {
+  let url = decode(raw);
+  const redirect = url.match(/[?&](?:uddg|url|u)=([^&]+)/);
+  if (redirect) {
+    try {
+      url = decodeURIComponent(redirect[1]);
+    } catch {
+      return null;
+    }
+  }
+  if (url.startsWith("//")) url = `https:${url}`;
+  if (!/^https?:\/\//i.test(url)) return null;
+  if (/duckduckgo\.com\/y\.js|google\.com\/(?:search|url)|mojeek\.com\/search|search\.brave\.com\/search|bing\.com\/search/i.test(url)) return null;
+  return url;
+}
+
+async function askEngine(engine: Engine, query: string, max: number): Promise<SearchHit[]> {
+  const target = engine.form ? engine.url : engine.url + encodeURIComponent(query);
+  const res = await fetch(target, {
+    method: engine.form ? "POST" : "GET",
+    headers: {
+      "User-Agent": BROWSER_UA,
+      Accept: "text/html,application/xhtml+xml",
+      "Accept-Language": "en-US,en;q=0.9",
+      ...(engine.form ? { "Content-Type": "application/x-www-form-urlencoded" } : {}),
+    },
+    body: engine.form ? new URLSearchParams({ q: query }).toString() : undefined,
     signal: AbortSignal.timeout(15_000),
+    redirect: "follow",
   });
-  if (!res.ok) throw new Error(`Search failed with HTTP ${res.status}.`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const html = await res.text();
   const hits: SearchHit[] = [];
-  const pattern = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?(?:<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>)?/g;
-  for (const m of html.matchAll(pattern)) {
-    let url = decode(m[1]);
-    const redirect = url.match(/[?&]uddg=([^&]+)/);
-    if (redirect) url = decodeURIComponent(redirect[1]);
-    if (url.startsWith("//")) url = `https:${url}`;
-    if (!/^https?:\/\//.test(url) || /duckduckgo\.com\/y\.js/.test(url)) continue;
-    hits.push({ title: decode(m[2]), url, content: decode(m[3] ?? "") });
+  const seen = new Set<string>();
+  for (const m of html.matchAll(engine.pattern)) {
+    const url = resolveLink(m[1]);
+    const title = decode(m[2] ?? "");
+    if (!url || !title || seen.has(url)) continue;
+    seen.add(url);
+    hits.push({ title, url, content: decode(m[3] ?? "").slice(0, 400) });
     if (hits.length >= max) break;
   }
   return hits;
+}
+
+/** Search with Tavily, which is a supported API rather than a scraped page. */
+async function tavilySearch(query: string, max: number, apiKey: string): Promise<SearchHit[]> {
+  const res = await fetch("https://api.tavily.com/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ query, max_results: Math.min(max, 10), search_depth: "basic" }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!res.ok) {
+    const body = (await res.text().catch(() => "")).slice(0, 200);
+    if (res.status === 401) throw new Error("Tavily rejected the key (401). Check TAVILY_API_KEY in .env.");
+    if (res.status === 429 || res.status === 432) throw new Error("Tavily is out of free credits for this month (429).");
+    throw new Error(`Tavily answered ${res.status}. ${body}`);
+  }
+  const body = (await res.json()) as { results?: { title?: string; url?: string; content?: string }[]; answer?: string };
+  return (body.results ?? [])
+    .filter((r) => r.url)
+    .slice(0, max)
+    .map((r) => ({ title: r.title ?? r.url!, url: r.url!, content: (r.content ?? "").slice(0, 400) }));
+}
+
+/** Search the web. Uses Tavily when TAVILY_API_KEY is set; otherwise tries the
+ * keyless engines in turn. Throws when nothing works, so an agent reports that
+ * rather than assuming the web holds nothing on the subject. */
+export async function searchWeb(query: string, max = 6): Promise<SearchHit[]> {
+  const tavily = process.env.TAVILY_API_KEY;
+  if (tavily) return tavilySearch(query, max, tavily);
+  const failures: string[] = [];
+  for (const engine of ENGINES) {
+    try {
+      const hits = await askEngine(engine, query, max);
+      if (hits.length) return hits;
+      failures.push(`${engine.name}: nothing matched`);
+    } catch (error) {
+      failures.push(`${engine.name}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  throw new Error(`Keyless web search is not working right now (${failures.join("; ")}). Set TAVILY_API_KEY in .env for a supported search API, then restart.`);
 }
 
 function isPrivateHost(host: string): boolean {
@@ -547,8 +650,26 @@ export async function testIntegration(id: string): Promise<{ ok: boolean; messag
         result = res.ok ? { ok: true, message: `Connected to Notion as "${json.name ?? "integration"}". No page was created by this test.` } : { ok: false, message: `Notion answered ${res.status}: ${json.message ?? ""}` };
       }
     } else if (id === "web") {
-      const hits = await searchWeb("MeetUniversity", 3);
-      result = hits.length ? { ok: true, message: `Search returned ${hits.length} results, first: ${hits[0].url}` } : { ok: false, message: "Search returned no results." };
+      // With a Tavily key the agents use Tavily's tools, so test that; otherwise test the keyless engines.
+      const tavily = process.env.TAVILY_API_KEY;
+      if (tavily) {
+        const res = await fetch("https://api.tavily.com/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${tavily}` },
+          body: JSON.stringify({ query: "MeetUniversity study abroad", max_results: 3 }),
+          signal: AbortSignal.timeout(20_000),
+        }).catch((error: Error) => error);
+        if (res instanceof Error) result = { ok: false, message: `Could not reach api.tavily.com: ${res.message}. Check your internet connection or a firewall.` };
+        else {
+          const body = (await res.json().catch(() => ({}))) as { results?: { url?: string }[]; detail?: unknown; error?: string };
+          const detail = typeof body.detail === "string" ? body.detail : ((body.detail as { error?: string })?.error ?? body.error ?? "");
+          if (!res.ok) result = { ok: false, message: `Tavily answered ${res.status}${res.status === 401 ? " (the key is wrong)" : res.status === 432 || res.status === 429 ? " (out of free credits for this month)" : ""}. ${detail}` };
+          else result = { ok: Boolean(body.results?.length), message: body.results?.length ? `Tavily is working: ${body.results.length} results, first ${body.results[0].url}` : "Tavily answered but returned no results." };
+        }
+      } else {
+        const hits = await searchWeb("MeetUniversity", 3);
+        result = hits.length ? { ok: true, message: `Keyless search returned ${hits.length} results, first: ${hits[0].url}` } : { ok: false, message: "Keyless search returned no results." };
+      }
     } else if (id === "mcp") {
       const servers = await listServers();
       if (!servers.length) result = { ok: false, message: "Add a server first." };
